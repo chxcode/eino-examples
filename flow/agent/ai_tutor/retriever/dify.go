@@ -71,37 +71,50 @@ type difyRetrievalRequest struct {
 	RetrievalModel map[string]interface{} `json:"retrieval_model"`
 }
 
+// difyQueryObject Dify 查询对象
+type difyQueryObject struct {
+	Content string `json:"content"`
+}
+
+// difySegment Dify 分段信息
+type difySegment struct {
+	ID            string   `json:"id"`
+	Position      int      `json:"position"`
+	DocumentID    string   `json:"document_id"`
+	Content       string   `json:"content"`
+	Answer        string   `json:"answer"`
+	WordCount     int      `json:"word_count"`
+	Tokens        int      `json:"tokens"`
+	Keywords      []string `json:"keywords"`
+	IndexNodeID   string   `json:"index_node_id"`
+	IndexNodeHash string   `json:"index_node_hash"`
+	HitCount      int      `json:"hit_count"`
+	Enabled       bool     `json:"enabled"`
+	DisabledAt    int64    `json:"disabled_at"`
+	DisabledBy    string   `json:"disabled_by"`
+	Status        string   `json:"status"`
+	CreatedBy     string   `json:"created_by"`
+	CreatedAt     int64    `json:"created_at"`
+	IndexingAt    int64    `json:"indexing_at"`
+	CompletedAt   int64    `json:"completed_at"`
+	Error         string   `json:"error"`
+	StoppedAt     int64    `json:"stopped_at"`
+}
+
+// difyRecord Dify 检索记录
+type difyRecord struct {
+	Segment      difySegment `json:"segment"`
+	Score        float64     `json:"score"`
+	TSNEPosition struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	} `json:"tsne_position"`
+}
+
 // difyRetrievalResponse Dify 检索响应
 type difyRetrievalResponse struct {
-	Query   string `json:"query"`
-	Records []struct {
-		Segment struct {
-			ID         string  `json:"id"`
-			Position   int     `json:"position"`
-			DocumentID string  `json:"document_id"`
-			Content    string  `json:"content"`
-			Answer     string  `json:"answer"`
-			WordCount  int     `json:"word_count"`
-			Tokens     int     `json:"tokens"`
-			Keywords   []string `json:"keywords"`
-			IndexNodeID string  `json:"index_node_id"`
-			IndexNodeHash string `json:"index_node_hash"`
-			HitCount    int     `json:"hit_count"`
-			Enabled     bool    `json:"enabled"`
-			Status      string  `json:"status"`
-			CreatedBy   string  `json:"created_by"`
-			CreatedAt   int64   `json:"created_at"`
-			IndexedAt   int64   `json:"indexed_at"`
-			CompletedAt int64   `json:"completed_at"`
-			Error       string  `json:"error"`
-			StoppedAt   int64   `json:"stopped_at"`
-		} `json:"segment"`
-		Score float64 `json:"score"`
-		TSNE  struct {
-			X float64 `json:"x"`
-			Y float64 `json:"y"`
-		} `json:"tsne_position"`
-	} `json:"records"`
+	Query   difyQueryObject `json:"query"`
+	Records []difyRecord    `json:"records"`
 }
 
 // Retrieve 检索知识库
