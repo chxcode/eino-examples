@@ -24,10 +24,11 @@ import (
 	"os"
 
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
+	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/callbacks"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/google/uuid"
 
-	"github.com/cloudwego/eino-examples/adk/common/model"
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/agents"
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/server"
 )
@@ -50,8 +51,8 @@ func main() {
 	// 初始化 Langfuse（如果配置了）
 	initLangfuse(ctx)
 
-	// 创建 ChatModel
-	chatModel := model.NewChatModel()
+	// 创建 ChatModel - 兼容 OPENAI_MODEL 和 OPENAI_MODEL_NAME 两种环境变量
+	chatModel := newChatModel(ctx)
 
 	// 构建 AI 学管 Supervisor
 	supervisor, err := agents.BuildAITutorSupervisor(ctx, chatModel)
@@ -74,6 +75,38 @@ func main() {
 	default:
 		log.Fatalf("Unknown mode: %s", *mode)
 	}
+}
+
+// newChatModel 创建 ChatModel，兼容 Host-Specialist 版本的环境变量命名
+func newChatModel(ctx context.Context) model.ToolCallingChatModel {
+	// 获取模型名称，优先使用 OPENAI_MODEL，其次使用 OPENAI_MODEL_NAME（与 Host-Specialist 版本兼容）
+	modelName := os.Getenv("OPENAI_MODEL")
+	if modelName == "" {
+		modelName = os.Getenv("OPENAI_MODEL_NAME")
+	}
+	if modelName == "" {
+		modelName = "gpt-4o" // 默认值
+	}
+
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	baseURL := os.Getenv("OPENAI_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	byAzure := os.Getenv("OPENAI_BY_AZURE") == "true"
+
+	log.Printf("[AI Tutor ADK] Model config: model=%s, baseURL=%s, byAzure=%v\n", modelName, baseURL, byAzure)
+
+	cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		APIKey:  apiKey,
+		Model:   modelName,
+		BaseURL: baseURL,
+		ByAzure: byAzure,
+	})
+	if err != nil {
+		log.Fatalf("Failed to create OpenAI ChatModel: %v", err)
+	}
+	return cm
 }
 
 func initLangfuse(ctx context.Context) {

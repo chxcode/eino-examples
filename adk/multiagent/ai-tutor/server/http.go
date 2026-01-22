@@ -266,6 +266,7 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 	// 收集事件和最终消息
 	var events []EventInfo
 	var finalMessage string
+	var lastAgentResponse string // 记录最后一个 agent 的完整响应
 
 	for {
 		event, hasEvent := iter.Next()
@@ -277,13 +278,19 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 		eventInfo := EventInfo{}
 		eventInfo.AgentName = event.AgentName
 
+		// 详细日志：记录每个事件
+		log.Printf("[Event] AgentName=%s, RunPath=%v, HasAction=%v, HasOutput=%v, HasErr=%v\n",
+			event.AgentName, event.RunPath, event.Action != nil, event.Output != nil, event.Err != nil)
+
 		// 处理 Action 事件
 		if event.Action != nil {
 			if event.Action.TransferToAgent != nil {
 				eventInfo.Action = fmt.Sprintf("transfer to %s", event.Action.TransferToAgent.DestAgentName)
+				log.Printf("[Action] Transfer from %s to %s\n", event.AgentName, event.Action.TransferToAgent.DestAgentName)
 			}
 			if event.Action.Exit {
 				eventInfo.Action = "exit"
+				log.Printf("[Action] Exit by %s\n", event.AgentName)
 			}
 		}
 
@@ -291,25 +298,54 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 		if event.Output != nil {
 			msg, _, err := adk.GetMessage(event)
 			if err == nil {
-				if msg.Content != "" {
-					eventInfo.Content = msg.Content
-					finalMessage = msg.Content
-				}
+				// 记录工具调用（发生在内容之前）
 				if len(msg.ToolCalls) > 0 {
 					for _, tc := range msg.ToolCalls {
 						eventInfo.Action = fmt.Sprintf("call tool: %s", tc.Function.Name)
+						log.Printf("[ToolCall] Agent=%s, Tool=%s, Args=%s\n",
+							event.AgentName, tc.Function.Name, tc.Function.Arguments)
 					}
 				}
+
+				// 记录消息内容
+				if msg.Content != "" {
+					log.Printf("[Output] Agent=%s, Content=%s\n", event.AgentName, truncate(msg.Content, 100))
+					eventInfo.Content = msg.Content
+
+					// 只有非 supervisor 的 agent 或者 exit 时的消息才作为最终响应
+					// 因为 supervisor 的消息通常是内部调度，不应该直接返回给用户
+					if event.AgentName != "ai_tutor_supervisor" {
+						lastAgentResponse = msg.Content
+					} else if event.Action != nil && event.Action.Exit {
+						// Supervisor 明确退出时的消息也算最终消息
+						lastAgentResponse = msg.Content
+					}
+				}
+			} else {
+				log.Printf("[Output] GetMessage error: %v\n", err)
 			}
 		}
 
 		// 处理错误
 		if event.Err != nil {
-			log.Printf("[Chat] Event error: %v\n", event.Err)
+			log.Printf("[Error] Agent=%s, Error=%v\n", event.AgentName, event.Err)
 		}
 
 		if eventInfo.AgentName != "" || eventInfo.Action != "" || eventInfo.Content != "" {
 			events = append(events, eventInfo)
+		}
+	}
+
+	// 确定最终消息：优先使用子 agent 的响应
+	if lastAgentResponse != "" {
+		finalMessage = lastAgentResponse
+	} else if len(events) > 0 {
+		// 如果没有子 agent 响应，从事件中找到最后一个有内容的事件
+		for i := len(events) - 1; i >= 0; i-- {
+			if events[i].Content != "" && events[i].AgentName != "ai_tutor_supervisor" {
+				finalMessage = events[i].Content
+				break
+			}
 		}
 	}
 
@@ -394,6 +430,14 @@ func (s *HTTPServer) jsonResponse(w http.ResponseWriter, status int, data interf
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
+}
+
+// truncate 截断字符串用于日志
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // RunCLI 运行命令行交互模式
