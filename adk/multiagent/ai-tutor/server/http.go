@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -247,13 +246,12 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           s.agent,
-		EnableStreaming: false,
+		EnableStreaming: true, // 必须启用流式模式
 	})
 
 	// 将历史消息转换为查询前缀
 	queryWithHistory := fullQuery
 	if len(history) > 0 {
-		// 历史消息通过上下文传递，这里简化处理
 		var historyStr strings.Builder
 		historyStr.WriteString("[历史对话]\n")
 		for _, msg := range history {
@@ -279,6 +277,7 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 		eventInfo := EventInfo{}
 		eventInfo.AgentName = event.AgentName
 
+		// 处理 Action 事件
 		if event.Action != nil {
 			if event.Action.TransferToAgent != nil {
 				eventInfo.Action = fmt.Sprintf("transfer to %s", event.Action.TransferToAgent.DestAgentName)
@@ -288,8 +287,10 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if event.Output != nil && event.Output.MessageOutput != nil {
-			if msg := event.Output.MessageOutput.Message; msg != nil {
+		// 处理 Output 事件 - 使用 adk.GetMessage 获取消息
+		if event.Output != nil {
+			msg, _, err := adk.GetMessage(event)
+			if err == nil {
 				if msg.Content != "" {
 					eventInfo.Content = msg.Content
 					finalMessage = msg.Content
@@ -299,27 +300,15 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 						eventInfo.Action = fmt.Sprintf("call tool: %s", tc.Function.Name)
 					}
 				}
-			} else if stream := event.Output.MessageOutput.MessageStream; stream != nil {
-				// 处理流式输出
-				var content strings.Builder
-				for {
-					chunk, err := stream.Recv()
-					if err != nil {
-						if err == io.EOF {
-							break
-						}
-						break
-					}
-					content.WriteString(chunk.Content)
-				}
-				if content.Len() > 0 {
-					eventInfo.Content = content.String()
-					finalMessage = content.String()
-				}
 			}
 		}
 
-		if eventInfo.AgentName != "" || eventInfo.Action != "" {
+		// 处理错误
+		if event.Err != nil {
+			log.Printf("[Chat] Event error: %v\n", event.Err)
+		}
+
+		if eventInfo.AgentName != "" || eventInfo.Action != "" || eventInfo.Content != "" {
 			events = append(events, eventInfo)
 		}
 	}
@@ -481,9 +470,10 @@ func RunCLI(agent adk.Agent) {
 				fmt.Printf("  [%s → %s]\n", event.AgentName, event.Action.TransferToAgent.DestAgentName)
 			}
 
-			// 处理工具调用
-			if event.Output != nil && event.Output.MessageOutput != nil {
-				if msg := event.Output.MessageOutput.Message; msg != nil {
+			// 使用 adk.GetMessage 获取消息
+			if event.Output != nil {
+				msg, _, err := adk.GetMessage(event)
+				if err == nil {
 					if len(msg.ToolCalls) > 0 {
 						for _, tc := range msg.ToolCalls {
 							fmt.Printf("  [调用工具: %s]\n", tc.Function.Name)
@@ -492,22 +482,12 @@ func RunCLI(agent adk.Agent) {
 					if msg.Content != "" {
 						finalMessage = msg.Content
 					}
-				} else if stream := event.Output.MessageOutput.MessageStream; stream != nil {
-					var content strings.Builder
-					for {
-						chunk, err := stream.Recv()
-						if err != nil {
-							if err == io.EOF {
-								break
-							}
-							break
-						}
-						content.WriteString(chunk.Content)
-					}
-					if content.Len() > 0 {
-						finalMessage = content.String()
-					}
 				}
+			}
+
+			// 打印错误
+			if event.Err != nil {
+				fmt.Printf("  [错误: %v]\n", event.Err)
 			}
 		}
 
