@@ -119,6 +119,11 @@ func callCourseService(ctx context.Context, endpoint string, req interface{}) ([
 	}
 	defer resp.Body.Close()
 
+	// 检查 HTTP 状态码
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("service returned status %d", resp.StatusCode)
+	}
+
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(resp.Body); err != nil {
 		return nil, err

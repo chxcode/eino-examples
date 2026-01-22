@@ -105,6 +105,11 @@ func callNetworkCheckService(ctx context.Context, userID, checkType string) (*Ne
 	}
 	defer resp.Body.Close()
 
+	// 检查 HTTP 状态码
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("service returned status %d", resp.StatusCode)
+	}
+
 	var result NetworkQualityCheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
