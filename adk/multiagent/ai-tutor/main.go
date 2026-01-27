@@ -23,6 +23,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -31,6 +32,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/agents"
+	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/retriever"
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/server"
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/store"
 )
@@ -70,15 +72,23 @@ func main() {
 	}
 	defer conversationStore.Close()
 
+	// 创建知识库检索器
+	knowledgeRetriever, err := initRetriever()
+	if err != nil {
+		log.Printf("[AI Tutor ADK] Warning: Failed to init knowledge retriever: %v\n", err)
+		knowledgeRetriever = retriever.NewNoopRetriever()
+	}
+	defer knowledgeRetriever.Close()
+
 	// 打印启动信息
 	printStartupInfo(*mode, *port, *storeType)
 
 	// 根据模式运行
 	switch *mode {
 	case "cli":
-		server.RunCLI(supervisor, conversationStore)
+		server.RunCLI(supervisor, conversationStore, knowledgeRetriever)
 	case "http":
-		httpServer := server.NewHTTPServer(supervisor, conversationStore, *port)
+		httpServer := server.NewHTTPServer(supervisor, conversationStore, knowledgeRetriever, *port)
 		if err := httpServer.Start(); err != nil {
 			log.Fatalf("Failed to start HTTP server: %v", err)
 		}
@@ -133,6 +143,53 @@ func initStore(storeTypeFlag string) (store.ConversationStore, error) {
 	log.Printf("[AI Tutor ADK] Store config: type=%s, dir=%s, maxMessages=%d\n", st, fileDir, maxMessages)
 
 	return store.NewStore(st, config)
+}
+
+// initRetriever 初始化知识库检索器
+func initRetriever() (retriever.KnowledgeRetriever, error) {
+	// 从环境变量获取配置
+	retrieverType := os.Getenv("RETRIEVER_TYPE")
+	if retrieverType == "" {
+		retrieverType = "none" // 默认不使用知识库
+	}
+
+	// Dify 配置
+	difyBaseURL := os.Getenv("DIFY_BASE_URL")
+	difyAPIKey := os.Getenv("DIFY_API_KEY")
+	difyDatasetID := os.Getenv("DIFY_DATASET_ID")
+
+	// 通用配置
+	topK := 5
+	if topKStr := os.Getenv("RETRIEVER_TOP_K"); topKStr != "" {
+		if n, err := strconv.Atoi(topKStr); err == nil && n > 0 {
+			topK = n
+		}
+	}
+
+	timeout := 30 * time.Second
+	if timeoutStr := os.Getenv("RETRIEVER_TIMEOUT"); timeoutStr != "" {
+		if d, err := time.ParseDuration(timeoutStr); err == nil {
+			timeout = d
+		}
+	}
+
+	config := &retriever.RetrieverConfig{
+		Type:          retriever.RetrieverType(retrieverType),
+		TopK:          topK,
+		Timeout:       timeout,
+		DifyBaseURL:   difyBaseURL,
+		DifyAPIKey:    difyAPIKey,
+		DifyDatasetID: difyDatasetID,
+	}
+
+	// 如果配置了 Dify，自动切换到 Dify 类型
+	if retrieverType == "none" && difyBaseURL != "" && difyAPIKey != "" && difyDatasetID != "" {
+		config.Type = retriever.RetrieverTypeDify
+	}
+
+	log.Printf("[AI Tutor ADK] Retriever config: type=%s, topK=%d, timeout=%s\n", config.Type, topK, timeout)
+
+	return retriever.NewRetriever(config)
 }
 
 // newChatModel 创建 ChatModel，兼容 Host-Specialist 版本的环境变量命名
@@ -260,6 +317,16 @@ Langfuse 观测 (可选):
   STORE_TYPE          - 存储类型: memory(内存)、file(文件，默认)、mysql、redis
   STORE_MAX_MESSAGES  - 最大消息数/滑动窗口大小 (默认: 20)
   STORE_FILE_DIR      - 文件存储目录 (默认: data/conversations)
+
+知识库检索配置:
+  RETRIEVER_TYPE      - 检索器类型: none(不使用)、dify、elasticsearch、milvus
+  RETRIEVER_TOP_K     - 返回结果数量 (默认: 5)
+  RETRIEVER_TIMEOUT   - 检索超时时间 (默认: 30s)
+
+  Dify 知识库:
+    DIFY_BASE_URL     - Dify API 地址 (如 https://api.dify.ai/v1)
+    DIFY_API_KEY      - Dify API 密钥
+    DIFY_DATASET_ID   - Dify 数据集 ID
 
 HTTP 服务:
   HTTP_PORT           - HTTP 端口 (默认: 8080)

@@ -29,29 +29,36 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/retriever"
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/store"
 )
 
 // HTTPServer HTTP 服务
 type HTTPServer struct {
-	agent adk.Agent
-	store store.ConversationStore
-	port  string
+	agent     adk.Agent
+	store     store.ConversationStore
+	retriever retriever.KnowledgeRetriever
+	port      string
 }
 
 // NewHTTPServer 创建 HTTP 服务
-// store 参数为会话存储实现，如果为 nil 则使用内存存储
-func NewHTTPServer(agent adk.Agent, conversationStore store.ConversationStore, port string) *HTTPServer {
+// conversationStore: 会话存储实现，如果为 nil 则使用内存存储
+// knowledgeRetriever: 知识库检索器，如果为 nil 则不使用知识库
+func NewHTTPServer(agent adk.Agent, conversationStore store.ConversationStore, knowledgeRetriever retriever.KnowledgeRetriever, port string) *HTTPServer {
 	if port == "" {
 		port = "8080"
 	}
 	if conversationStore == nil {
 		conversationStore = store.NewMemoryStore(20)
 	}
+	if knowledgeRetriever == nil {
+		knowledgeRetriever = retriever.NewNoopRetriever()
+	}
 	return &HTTPServer{
-		agent: agent,
-		store: conversationStore,
-		port:  port,
+		agent:     agent,
+		store:     conversationStore,
+		retriever: knowledgeRetriever,
+		port:      port,
 	}
 }
 
@@ -193,27 +200,50 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 		history = []*schema.Message{} // 出错时使用空历史
 	}
 
+	// 检索知识库
+	var knowledgeContext string
+	if s.retriever.Name() != "noop" {
+		knowledgeContext, err = s.retriever.RetrieveFormatted(ctx, message, nil)
+		if err != nil {
+			log.Printf("[Chat] Failed to retrieve knowledge: %v\n", err)
+		} else if knowledgeContext != "" {
+			log.Printf("[Chat] Retrieved knowledge: %s\n", truncate(knowledgeContext, 100))
+		}
+	}
+
 	// 构建输入消息
-	contextInfo := fmt.Sprintf("[用户ID: %s]", uid)
-	fullQuery := contextInfo + "\n\n" + message
+	var queryBuilder strings.Builder
+	queryBuilder.WriteString(fmt.Sprintf("[用户ID: %s]\n\n", uid))
+
+	// 添加历史对话
+	if len(history) > 0 {
+		queryBuilder.WriteString("[历史对话]\n")
+		for _, msg := range history {
+			queryBuilder.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
+		}
+		queryBuilder.WriteString("\n")
+	}
+
+	// 添加知识库上下文
+	if knowledgeContext != "" {
+		queryBuilder.WriteString("[相关知识]\n")
+		queryBuilder.WriteString(knowledgeContext)
+		queryBuilder.WriteString("\n")
+	}
+
+	// 添加当前问题
+	queryBuilder.WriteString("[当前问题]\n")
+	queryBuilder.WriteString(message)
+
+	fullQuery := queryBuilder.String()
+
+	// 创建 Runner 并执行
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           s.agent,
 		EnableStreaming: true, // 必须启用流式模式
 	})
 
-	// 将历史消息转换为查询前缀
-	queryWithHistory := fullQuery
-	if len(history) > 0 {
-		var historyStr strings.Builder
-		historyStr.WriteString("[历史对话]\n")
-		for _, msg := range history {
-			historyStr.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
-		}
-		historyStr.WriteString("\n[当前问题]\n")
-		queryWithHistory = historyStr.String() + fullQuery
-	}
-
-	iter := runner.Query(ctx, queryWithHistory)
+	iter := runner.Query(ctx, fullQuery)
 
 	// 收集事件和最终消息
 	var events []EventInfo
@@ -423,11 +453,15 @@ func truncate(s string, maxLen int) string {
 }
 
 // RunCLI 运行命令行交互模式
-// conversationStore 为会话存储实现，如果为 nil 则使用内存存储
-func RunCLI(agent adk.Agent, conversationStore store.ConversationStore) {
+// conversationStore: 会话存储实现，如果为 nil 则使用内存存储
+// knowledgeRetriever: 知识库检索器，如果为 nil 则不使用知识库
+func RunCLI(agent adk.Agent, conversationStore store.ConversationStore, knowledgeRetriever retriever.KnowledgeRetriever) {
 	ctx := context.Background()
 	if conversationStore == nil {
 		conversationStore = store.NewMemoryStore(20)
+	}
+	if knowledgeRetriever == nil {
+		knowledgeRetriever = retriever.NewNoopRetriever()
 	}
 	uid := "cli_user"
 
@@ -464,26 +498,51 @@ func RunCLI(agent adk.Agent, conversationStore store.ConversationStore) {
 		// 获取历史
 		history, _ := conversationStore.GetHistory(ctx, uid, 0)
 
+		// 检索知识库
+		var knowledgeContext string
+		if knowledgeRetriever.Name() != "noop" {
+			var err error
+			knowledgeContext, err = knowledgeRetriever.RetrieveFormatted(ctx, input, nil)
+			if err != nil {
+				fmt.Printf("  [知识库检索失败: %v]\n", err)
+			} else if knowledgeContext != "" {
+				fmt.Println("  [已检索到相关知识]")
+			}
+		}
+
+		// 构建查询
+		var queryBuilder strings.Builder
+
+		// 添加历史对话
+		if len(history) > 0 {
+			queryBuilder.WriteString("[历史对话]\n")
+			for _, msg := range history {
+				queryBuilder.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
+			}
+			queryBuilder.WriteString("\n")
+		}
+
+		// 添加知识库上下文
+		if knowledgeContext != "" {
+			queryBuilder.WriteString("[相关知识]\n")
+			queryBuilder.WriteString(knowledgeContext)
+			queryBuilder.WriteString("\n")
+		}
+
+		// 添加当前问题
+		queryBuilder.WriteString("[当前问题]\n")
+		queryBuilder.WriteString(input)
+
+		fullQuery := queryBuilder.String()
+
 		// 创建 Runner
 		runner := adk.NewRunner(ctx, adk.RunnerConfig{
 			Agent:           agent,
 			EnableStreaming: true,
 		})
 
-		// 将历史消息附加到查询
-		queryWithHistory := input
-		if len(history) > 0 {
-			var historyStr strings.Builder
-			historyStr.WriteString("[历史对话]\n")
-			for _, msg := range history {
-				historyStr.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
-			}
-			historyStr.WriteString("\n[当前问题]\n")
-			queryWithHistory = historyStr.String() + input
-		}
-
 		// 执行查询
-		iter := runner.Query(ctx, queryWithHistory)
+		iter := runner.Query(ctx, fullQuery)
 
 		fmt.Println()
 		var finalMessage string
