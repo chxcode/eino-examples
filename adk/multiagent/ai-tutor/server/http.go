@@ -266,7 +266,8 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 	// 收集事件和最终消息
 	var events []EventInfo
 	var finalMessage string
-	var lastAgentResponse string // 记录最后一个 agent 的完整响应
+	var subAgentResponses []string // 收集所有子 agent 的实质性回复
+	var supervisorExitMessage string // supervisor 退出时的消息
 
 	for {
 		event, hasEvent := iter.Next()
@@ -312,13 +313,16 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 					log.Printf("[Output] Agent=%s, Content=%s\n", event.AgentName, truncate(msg.Content, 100))
 					eventInfo.Content = msg.Content
 
-					// 只有非 supervisor 的 agent 或者 exit 时的消息才作为最终响应
-					// 因为 supervisor 的消息通常是内部调度，不应该直接返回给用户
+					// 收集子 agent 的实质性回复（排除 transfer 成功消息）
 					if event.AgentName != "ai_tutor_supervisor" {
-						lastAgentResponse = msg.Content
+						// 过滤掉 transfer 工具的成功消息
+						if !strings.HasPrefix(msg.Content, "successfully transferred to agent") {
+							subAgentResponses = append(subAgentResponses, msg.Content)
+							log.Printf("[SubAgent Response] Agent=%s, Content=%s\n", event.AgentName, truncate(msg.Content, 50))
+						}
 					} else if event.Action != nil && event.Action.Exit {
-						// Supervisor 明确退出时的消息也算最终消息
-						lastAgentResponse = msg.Content
+						// 记录 supervisor 退出时的消息
+						supervisorExitMessage = msg.Content
 					}
 				}
 			} else {
@@ -336,17 +340,15 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 确定最终消息：优先使用子 agent 的响应
-	if lastAgentResponse != "" {
-		finalMessage = lastAgentResponse
-	} else if len(events) > 0 {
-		// 如果没有子 agent 响应，从事件中找到最后一个有内容的事件
-		for i := len(events) - 1; i >= 0; i-- {
-			if events[i].Content != "" && events[i].AgentName != "ai_tutor_supervisor" {
-				finalMessage = events[i].Content
-				break
-			}
-		}
+	// 确定最终消息：优先使用子 agent 的实质性回复
+	if len(subAgentResponses) > 0 {
+		// 使用最后一个子 agent 的回复（通常是最相关的）
+		finalMessage = subAgentResponses[len(subAgentResponses)-1]
+		log.Printf("[FinalMessage] Using sub-agent response: %s\n", truncate(finalMessage, 50))
+	} else if supervisorExitMessage != "" {
+		// 如果没有子 agent 回复，使用 supervisor 退出消息
+		finalMessage = supervisorExitMessage
+		log.Printf("[FinalMessage] Using supervisor exit message: %s\n", truncate(finalMessage, 50))
 	}
 
 	// 保存会话
