@@ -52,7 +52,10 @@ const FaultHandlerInstruction = `你是一位专业的网络故障处理专家�
 - 确保用户理解每一个步骤
 - 在提供建议后，询问用户是否需要进一步帮助
 
-完成任务后，直接向 supervisor 报告处理结果。`
+## 重要提醒
+- 你的回复将直接展示给用户
+- 不要在回复中包含任何内部报告、状态说明或给 supervisor 的信息
+- 只输出给用户看的内容`
 
 // BuildFaultHandlerAgent 构建故障处理 Agent
 func BuildFaultHandlerAgent(ctx context.Context, m model.ToolCallingChatModel) (adk.Agent, error) {

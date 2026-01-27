@@ -75,7 +75,10 @@ const EmotionSupportInstruction = `你是一位富有同理心的情绪支持专
 - 不要做出无法兑现的承诺
 - 尊重用户的感受，不要否定他们的情绪
 
-完成任务后，直接向 supervisor 报告处理结果。`
+## 重要提醒
+- 你的回复将直接展示给用户
+- 不要在回复中包含任何内部报告、状态说明或给 supervisor 的信息
+- 只输出给用户看的内容`
 
 // BuildEmotionSupportAgent 构建情绪安抚 Agent
 func BuildEmotionSupportAgent(ctx context.Context, m model.ToolCallingChatModel) (adk.Agent, error) {

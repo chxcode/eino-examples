@@ -73,7 +73,10 @@ const CourseHandlerInstruction = `你是一位专业的课程顾问，专门帮�
 - 对于敏感操作（如取消课程），要二次确认
 - 如果遇到无法处理的情况，说明原因并建议联系人工客服
 
-完成任务后，直接向 supervisor 报告处理结果。`
+## 重要提醒
+- 你的回复将直接展示给用户
+- 不要在回复中包含任何内部报告、状态说明或给 supervisor 的信息
+- 只输出给用户看的内容`
 
 // BuildCourseHandlerAgent 构建课程处理 Agent
 func BuildCourseHandlerAgent(ctx context.Context, m model.ToolCallingChatModel) (adk.Agent, error) {
