@@ -25,84 +25,32 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/store"
 )
-
-// ConversationStore 会话存储
-type ConversationStore struct {
-	mu            sync.RWMutex
-	conversations map[string][]*schema.Message
-	maxMessages   int
-}
-
-// NewConversationStore 创建会话存储
-func NewConversationStore(maxMessages int) *ConversationStore {
-	if maxMessages <= 0 {
-		maxMessages = 20
-	}
-	return &ConversationStore{
-		conversations: make(map[string][]*schema.Message),
-		maxMessages:   maxMessages,
-	}
-}
-
-// GetHistory 获取会话历史
-func (s *ConversationStore) GetHistory(uid string) []*schema.Message {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.conversations[uid]
-}
-
-// AppendMessage 添加消息
-func (s *ConversationStore) AppendMessage(uid string, msg *schema.Message) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.conversations[uid] = append(s.conversations[uid], msg)
-
-	// 保持滑动窗口
-	if len(s.conversations[uid]) > s.maxMessages {
-		s.conversations[uid] = s.conversations[uid][len(s.conversations[uid])-s.maxMessages:]
-	}
-}
-
-// Clear 清空会话
-func (s *ConversationStore) Clear(uid string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.conversations, uid)
-}
-
-// ListUsers 列出所有用户
-func (s *ConversationStore) ListUsers() []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	users := make([]string, 0, len(s.conversations))
-	for uid := range s.conversations {
-		users = append(users, uid)
-	}
-	return users
-}
 
 // HTTPServer HTTP 服务
 type HTTPServer struct {
 	agent adk.Agent
-	store *ConversationStore
+	store store.ConversationStore
 	port  string
 }
 
 // NewHTTPServer 创建 HTTP 服务
-func NewHTTPServer(agent adk.Agent, port string) *HTTPServer {
+// store 参数为会话存储实现，如果为 nil 则使用内存存储
+func NewHTTPServer(agent adk.Agent, conversationStore store.ConversationStore, port string) *HTTPServer {
 	if port == "" {
 		port = "8080"
 	}
+	if conversationStore == nil {
+		conversationStore = store.NewMemoryStore(20)
+	}
 	return &HTTPServer{
 		agent: agent,
-		store: NewConversationStore(20),
+		store: conversationStore,
 		port:  port,
 	}
 }
@@ -235,15 +183,19 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Chat] uid=%s, message=%s\n", uid, message)
 
+	// 创建 context
+	ctx := context.Background()
+
 	// 获取历史消息
-	history := s.store.GetHistory(uid)
+	history, err := s.store.GetHistory(ctx, uid, 0)
+	if err != nil {
+		log.Printf("[Chat] Failed to get history: %v\n", err)
+		history = []*schema.Message{} // 出错时使用空历史
+	}
 
 	// 构建输入消息
 	contextInfo := fmt.Sprintf("[用户ID: %s]", uid)
 	fullQuery := contextInfo + "\n\n" + message
-
-	// 创建 Runner 并执行
-	ctx := context.Background()
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           s.agent,
 		EnableStreaming: true, // 必须启用流式模式
@@ -352,9 +304,13 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 保存会话
-	s.store.AppendMessage(uid, schema.UserMessage(message))
+	if err := s.store.AppendMessage(ctx, uid, schema.UserMessage(message)); err != nil {
+		log.Printf("[Chat] Failed to save user message: %v\n", err)
+	}
 	if finalMessage != "" {
-		s.store.AppendMessage(uid, schema.AssistantMessage(finalMessage, nil))
+		if err := s.store.AppendMessage(ctx, uid, schema.AssistantMessage(finalMessage, nil)); err != nil {
+			log.Printf("[Chat] Failed to save assistant message: %v\n", err)
+		}
 	}
 
 	s.jsonResponse(w, http.StatusOK, ChatResponse{
@@ -367,6 +323,8 @@ func (s *HTTPServer) handleChat(w http.ResponseWriter, r *http.Request) {
 
 // handleHistory 处理历史记录请求
 func (s *HTTPServer) handleHistory(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if r.Method == http.MethodDelete {
 		uid := r.URL.Query().Get("uid")
 		if uid == "" {
@@ -376,7 +334,13 @@ func (s *HTTPServer) handleHistory(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		s.store.Clear(uid)
+		if err := s.store.Clear(ctx, uid); err != nil {
+			s.jsonResponse(w, http.StatusInternalServerError, map[string]string{
+				"status": "error",
+				"error":  fmt.Sprintf("failed to clear conversation: %v", err),
+			})
+			return
+		}
 		s.jsonResponse(w, http.StatusOK, map[string]string{
 			"status":  "success",
 			"message": fmt.Sprintf("conversation for user %s deleted", uid),
@@ -387,7 +351,14 @@ func (s *HTTPServer) handleHistory(w http.ResponseWriter, r *http.Request) {
 	uid := r.URL.Query().Get("uid")
 	if uid == "" {
 		// 列出所有用户
-		users := s.store.ListUsers()
+		users, err := s.store.ListUsers(ctx)
+		if err != nil {
+			s.jsonResponse(w, http.StatusInternalServerError, map[string]string{
+				"status": "error",
+				"error":  fmt.Sprintf("failed to list users: %v", err),
+			})
+			return
+		}
 		s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"status": "success",
 			"users":  users,
@@ -396,11 +367,20 @@ func (s *HTTPServer) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 获取指定用户的历史
-	history := s.store.GetHistory(uid)
-	if history == nil {
-		s.jsonResponse(w, http.StatusNotFound, map[string]string{
+	history, err := s.store.GetHistory(ctx, uid, 0)
+	if err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, map[string]string{
 			"status": "error",
-			"error":  "conversation not found",
+			"error":  fmt.Sprintf("failed to get history: %v", err),
+		})
+		return
+	}
+
+	if len(history) == 0 {
+		s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"status":  "success",
+			"user_id": uid,
+			"history": []map[string]string{},
 		})
 		return
 	}
@@ -443,9 +423,12 @@ func truncate(s string, maxLen int) string {
 }
 
 // RunCLI 运行命令行交互模式
-func RunCLI(agent adk.Agent) {
+// conversationStore 为会话存储实现，如果为 nil 则使用内存存储
+func RunCLI(agent adk.Agent, conversationStore store.ConversationStore) {
 	ctx := context.Background()
-	store := NewConversationStore(20)
+	if conversationStore == nil {
+		conversationStore = store.NewMemoryStore(20)
+	}
 	uid := "cli_user"
 
 	fmt.Println("========================================")
@@ -473,13 +456,13 @@ func RunCLI(agent adk.Agent) {
 		}
 
 		if input == "clear" {
-			store.Clear(uid)
+			_ = conversationStore.Clear(ctx, uid)
 			fmt.Println("[会话历史已清空]")
 			continue
 		}
 
 		// 获取历史
-		history := store.GetHistory(uid)
+		history, _ := conversationStore.GetHistory(ctx, uid, 0)
 
 		// 创建 Runner
 		runner := adk.NewRunner(ctx, adk.RunnerConfig{
@@ -541,8 +524,8 @@ func RunCLI(agent adk.Agent) {
 			fmt.Printf("\nAssistant: %s\n\n", finalMessage)
 
 			// 保存会话
-			store.AppendMessage(uid, schema.UserMessage(input))
-			store.AppendMessage(uid, schema.AssistantMessage(finalMessage, nil))
+			_ = conversationStore.AppendMessage(ctx, uid, schema.UserMessage(input))
+			_ = conversationStore.AppendMessage(ctx, uid, schema.AssistantMessage(finalMessage, nil))
 		}
 	}
 }

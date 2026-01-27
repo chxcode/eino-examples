@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -31,12 +32,14 @@ import (
 
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/agents"
 	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/server"
+	"github.com/cloudwego/eino-examples/adk/multiagent/ai-tutor/store"
 )
 
 func main() {
 	// 解析命令行参数
 	mode := flag.String("mode", "http", "运行模式: http (HTTP服务) 或 cli (命令行交互)")
 	port := flag.String("port", "", "HTTP 端口 (默认 8080)")
+	storeType := flag.String("store", "", "存储类型: memory (内存) 或 file (文件)")
 	flag.Parse()
 
 	if *port == "" {
@@ -60,21 +63,76 @@ func main() {
 		log.Fatalf("Failed to build AI tutor supervisor: %v", err)
 	}
 
+	// 创建会话存储
+	conversationStore, err := initStore(*storeType)
+	if err != nil {
+		log.Fatalf("Failed to init conversation store: %v", err)
+	}
+	defer conversationStore.Close()
+
 	// 打印启动信息
-	printStartupInfo(*mode, *port)
+	printStartupInfo(*mode, *port, *storeType)
 
 	// 根据模式运行
 	switch *mode {
 	case "cli":
-		server.RunCLI(supervisor)
+		server.RunCLI(supervisor, conversationStore)
 	case "http":
-		httpServer := server.NewHTTPServer(supervisor, *port)
+		httpServer := server.NewHTTPServer(supervisor, conversationStore, *port)
 		if err := httpServer.Start(); err != nil {
 			log.Fatalf("Failed to start HTTP server: %v", err)
 		}
 	default:
 		log.Fatalf("Unknown mode: %s", *mode)
 	}
+}
+
+// initStore 初始化会话存储
+func initStore(storeTypeFlag string) (store.ConversationStore, error) {
+	// 优先使用命令行参数，其次使用环境变量
+	storeTypeStr := storeTypeFlag
+	if storeTypeStr == "" {
+		storeTypeStr = os.Getenv("STORE_TYPE")
+	}
+	if storeTypeStr == "" {
+		storeTypeStr = "file" // 默认使用文件存储
+	}
+
+	// 获取配置
+	maxMessages := 20
+	if maxMsgStr := os.Getenv("STORE_MAX_MESSAGES"); maxMsgStr != "" {
+		if n, err := strconv.Atoi(maxMsgStr); err == nil && n > 0 {
+			maxMessages = n
+		}
+	}
+
+	fileDir := os.Getenv("STORE_FILE_DIR")
+	if fileDir == "" {
+		fileDir = "data/conversations"
+	}
+
+	config := &store.StoreConfig{
+		MaxMessages: maxMessages,
+		FileDir:     fileDir,
+	}
+
+	var st store.StoreType
+	switch storeTypeStr {
+	case "memory":
+		st = store.StoreTypeMemory
+	case "file":
+		st = store.StoreTypeFile
+	case "mysql":
+		st = store.StoreTypeMySQL
+	case "redis":
+		st = store.StoreTypeRedis
+	default:
+		st = store.StoreTypeFile
+	}
+
+	log.Printf("[AI Tutor ADK] Store config: type=%s, dir=%s, maxMessages=%d\n", st, fileDir, maxMessages)
+
+	return store.NewStore(st, config)
 }
 
 // newChatModel 创建 ChatModel，兼容 Host-Specialist 版本的环境变量命名
@@ -139,7 +197,7 @@ func initLangfuse(ctx context.Context) {
 	}
 }
 
-func printStartupInfo(mode, port string) {
+func printStartupInfo(mode, port, storeType string) {
 	fmt.Println("========================================")
 	fmt.Println("  🎓 AI 学管助手 (ADK Supervisor 版本)")
 	fmt.Println("========================================")
@@ -149,6 +207,7 @@ func printStartupInfo(mode, port string) {
 	fmt.Println("   - Runner + 事件流执行模型")
 	fmt.Println("   - 显式任务委派 (Transfer)")
 	fmt.Println("   - Exit Tool 控制对话结束")
+	fmt.Println("   - 可扩展的会话持久化接口")
 	fmt.Println()
 	fmt.Println("👥 Agent 团队：")
 	fmt.Println("   - ai_tutor_supervisor: 学管协调员")
@@ -197,12 +256,18 @@ Langfuse 观测 (可选):
   LANGFUSE_PUBLIC_KEY - Langfuse 公钥
   LANGFUSE_SECRET_KEY - Langfuse 私钥
 
+会话存储配置:
+  STORE_TYPE          - 存储类型: memory(内存)、file(文件，默认)、mysql、redis
+  STORE_MAX_MESSAGES  - 最大消息数/滑动窗口大小 (默认: 20)
+  STORE_FILE_DIR      - 文件存储目录 (默认: data/conversations)
+
 HTTP 服务:
   HTTP_PORT           - HTTP 端口 (默认: 8080)
 
 命令行参数:
   -mode http|cli      - 运行模式
   -port 8080          - HTTP 端口
+  -store memory|file  - 存储类型
 `
 	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
 		fmt.Println(envHelp)
