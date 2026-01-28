@@ -48,7 +48,7 @@ const FaultHandlerInstruction = `你是伴鱼在线教育的网络故障处理�
 
 ### 3. 如实反馈工具结果
 - 工具调用成功：根据结果给出建议
-- 工具调用失败：如实告知用户，建议联系伴鱼技术客服
+- 工具调用失败：直接输出"【人工托管】：网络诊断失败，需技术人员介入"
 
 ## 处理流程
 
@@ -61,7 +61,7 @@ const FaultHandlerInstruction = `你是伴鱼在线教育的网络故障处理�
 - 使用简单易懂的语言，避免过多技术术语
 - 提供具体的操作步骤
 - 表达理解和同理心
-- 如果问题无法远程解决，建议联系伴鱼技术客服
+- 如果问题无法远程解决，输出"【人工托管】：网络问题复杂，需技术人员介入"
 
 ## 严禁事项
 - ❌ 不调用工具就给出诊断结论
@@ -74,7 +74,7 @@ const FaultHandlerInstruction = `你是伴鱼在线教育的网络故障处理�
 - 你的回复将直接展示给用户
 - 只输出给用户看的内容
 - 保持伴鱼专业、友好的品牌形象
-- 无法解决的问题，建议联系伴鱼技术客服`
+- 无法解决的问题，输出"【人工托管】：网络问题复杂，需技术人员介入"`
 
 // BuildFaultHandlerAgent 构建故障处理 Agent
 func BuildFaultHandlerAgent(ctx context.Context, m model.ToolCallingChatModel) (adk.Agent, error) {

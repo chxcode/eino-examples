@@ -34,7 +34,7 @@ func GetNetworkCheckURL() string {
 	if url := os.Getenv("NETWORK_CHECK_URL"); url != "" {
 		return url
 	}
-	return "http://localhost:9000/api/network"
+	return "http://localhost:9002/api/network"
 }
 
 // ==================== 网络质量检查工具 ====================

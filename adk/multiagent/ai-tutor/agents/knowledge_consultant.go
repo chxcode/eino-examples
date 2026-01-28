@@ -73,8 +73,7 @@ const KnowledgeConsultantInstruction = `你是伴鱼在线教育的课程知识�
 根据 [相关知识] 的内容组织回答，确保信息准确。
 
 **知识库没有相关信息时：**
-"感谢您的咨询！关于[具体问题]，建议您联系伴鱼客服（电话：xxx / 在线客服）获取最准确的信息。
-如果您有其他关于课程的问题，我很乐意为您解答。"
+直接输出：【人工托管】：知识库未收录该问题，需人工解答
 
 ## 严禁事项
 - ❌ 编造课程价格、优惠活动
@@ -86,7 +85,8 @@ const KnowledgeConsultantInstruction = `你是伴鱼在线教育的课程知识�
 ## 重要提醒
 - 你的回复将直接展示给用户
 - 只输出给用户看的内容
-- 保持伴鱼专业、友好的品牌形象`
+- 保持伴鱼专业、友好的品牌形象
+- 知识库无法回答的问题，输出"【人工托管】：知识库未收录该问题，需人工解答"`
 
 // BuildKnowledgeConsultantAgent 构建课程知识顾问 Agent
 func BuildKnowledgeConsultantAgent(ctx context.Context, m model.ToolCallingChatModel) (adk.Agent, error) {

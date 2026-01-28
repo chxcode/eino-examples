@@ -1,0 +1,8 @@
+# Binary
+ai-tutor
+
+# Data directory
+data/
+
+# Log files
+*.log

@@ -58,7 +58,7 @@ const EmotionSupportInstruction = `你是伴鱼在线教育的情绪支持专家
 ### 对伴鱼服务不满
 - 真诚表达歉意
 - 认真听取用户反馈
-- 记录问题，建议联系伴鱼客服跟进处理
+- 如果用户坚持投诉或要求补偿，输出"【人工托管】：用户投诉/要求补偿，需人工处理"
 - **不要**承诺任何补偿或优惠
 
 ### 学习受挫
@@ -89,7 +89,8 @@ const EmotionSupportInstruction = `你是伴鱼在线教育的情绪支持专家
 - 你的回复将直接展示给用户
 - 只输出给用户看的内容
 - 保持伴鱼专业、友好、温暖的品牌形象
-- 涉及投诉或补偿，建议联系伴鱼客服`
+- 涉及投诉或补偿，输出"【人工托管】：用户投诉/要求补偿，需人工处理"
+- 情绪问题超出学习范畴，输出"【人工托管】：用户情绪问题严重，需专业人员介入"`
 
 // BuildEmotionSupportAgent 构建情绪安抚 Agent
 func BuildEmotionSupportAgent(ctx context.Context, m model.ToolCallingChatModel) (adk.Agent, error) {

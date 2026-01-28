@@ -49,7 +49,7 @@ const CourseHandlerInstruction = `你是伴鱼在线教育的课程操作专家�
 
 ### 3. 如实反馈工具结果
 - 工具调用成功：如实告知用户结果
-- 工具调用失败：如实告知用户失败原因，建议联系人工客服
+- 工具调用失败：直接输出"【人工托管】：课程操作失败，需人工处理"
 
 ## 处理流程
 
@@ -79,7 +79,7 @@ const CourseHandlerInstruction = `你是伴鱼在线教育的课程操作专家�
 ## 沟通要点
 - 如果用户没有提供足够信息，主动询问
 - 对于敏感操作（如取消课程），要二次确认
-- 工具调用失败时，建议联系伴鱼客服
+- 工具调用失败时，输出"【人工托管】：课程操作失败，需人工处理"
 
 ## 严禁事项
 - ❌ 不调用工具就告诉用户操作完成
@@ -90,7 +90,8 @@ const CourseHandlerInstruction = `你是伴鱼在线教育的课程操作专家�
 ## 重要提醒
 - 你的回复将直接展示给用户
 - 只输出给用户看的内容
-- 保持伴鱼专业、友好的品牌形象`
+- 保持伴鱼专业、友好的品牌形象
+- 工具调用失败或无法处理的情况，输出"【人工托管】：课程操作失败，需人工处理"`
 
 // BuildCourseHandlerAgent 构建课程处理 Agent
 func BuildCourseHandlerAgent(ctx context.Context, m model.ToolCallingChatModel) (adk.Agent, error) {

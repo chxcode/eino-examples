@@ -152,15 +152,39 @@ func FormatDocuments(docs []*Document, format string) string {
 
 	var result string
 	for i, doc := range docs {
+		// 获取 answer 字段
+		answer := ""
+		if doc.Metadata != nil {
+			if ans, ok := doc.Metadata["answer"].(string); ok && ans != "" {
+				answer = ans
+			}
+		}
+
 		switch format {
 		case "numbered":
-			result += fmt.Sprintf("【知识点 %d】\n%s\n\n", i+1, doc.Content)
+			if answer != "" {
+				result += fmt.Sprintf("【知识点 %d】\n%s\n%s\n\n", i+1, doc.Content, answer)
+			} else {
+				result += fmt.Sprintf("【知识点 %d】\n%s\n\n", i+1, doc.Content)
+			}
 		case "bullet":
-			result += fmt.Sprintf("• %s\n\n", doc.Content)
+			if answer != "" {
+				result += fmt.Sprintf("• %s\n%s\n\n", doc.Content, answer)
+			} else {
+				result += fmt.Sprintf("• %s\n\n", doc.Content)
+			}
 		case "plain":
-			result += doc.Content + "\n\n"
+			if answer != "" {
+				result += doc.Content + "\n" + answer + "\n\n"
+			} else {
+				result += doc.Content + "\n\n"
+			}
 		default:
-			result += fmt.Sprintf("【知识点 %d】\n%s\n\n", i+1, doc.Content)
+			if answer != "" {
+				result += fmt.Sprintf("【知识点 %d】\n%s\n%s\n\n", i+1, doc.Content, answer)
+			} else {
+				result += fmt.Sprintf("【知识点 %d】\n%s\n\n", i+1, doc.Content)
+			}
 		}
 	}
 
