@@ -268,9 +268,10 @@ func printStartupInfo(mode, port, storeType string) {
 	fmt.Println()
 	fmt.Println("👥 Agent 团队：")
 	fmt.Println("   - ai_tutor_supervisor: 学管协调员")
+	fmt.Println("   - knowledge_consultant: 课程知识顾问")
 	fmt.Println("   - fault_handler: 网络故障处理专家")
 	fmt.Println("   - emotion_support: 情绪安抚专家")
-	fmt.Println("   - course_handler: 课程处理专家")
+	fmt.Println("   - course_handler: 课程操作专家")
 	fmt.Println()
 
 	if mode == "http" {
